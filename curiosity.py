@@ -8,7 +8,8 @@ from threading import Thread
 from time import sleep
 
 class Autoencoder(nn.Module):
-    def __init__(self, procesimgsize=64, params=32, size=6, size2=4):
+    def __init__(self, procesimgsize=32, params=12, size=6, size2=4):    
+    #def __init__(self, procesimgsize=64, params=32, size=6, size2=4):
         super(Autoencoder, self).__init__()
         # Encoder
         self.encoder = nn.Sequential(
@@ -42,17 +43,15 @@ class curiosity:
     
     pause=0
 
-    def __init__(self, camera, pause=0,split_values = [[0, 0], [0, 0]],savemodel=True):
+    def __init__(self, camera, pause=0,split_values = [1,1],savemodel=True):
         self.split_values=split_values
         self.pause=pause
         self.state_vals=[]
         for s in self.split_values:
-            if type(s)==list:
-                for ss in s:
-                    self.state_vals.append(0)
-            else:
+            for ss in range(s):
                 self.state_vals.append(0)
-
+       
+        print("self.state_vals",self.state_vals)
         self.savemodel = savemodel
         self.CAM = camera
         self.ready = False
@@ -125,7 +124,7 @@ class curiosity:
         
         return mse
 
-    def update_model_with_new_image(self, image, epochs=5):
+    def update_model_with_new_image(self, image, epochs=10):
         for epoch in range(epochs):
             self.optimizer.zero_grad()
             output = self.autoencoder(image)
