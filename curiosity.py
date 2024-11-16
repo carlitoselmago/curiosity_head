@@ -39,10 +39,11 @@ class Autoencoder(nn.Module):
 class curiosity:
     procesimgsize = 64
     saved_model_uri = "saved_model.pth"
-    split_values = [[0, 0], [0, 0]]
+    
     pause=0
 
-    def __init__(self, camera, pause=0,savemodel=True):
+    def __init__(self, camera, pause=0,split_values = [[0, 0], [0, 0]],savemodel=True):
+        self.split_values=split_values
         self.pause=pause
         self.state_vals=[]
         for s in self.split_values:
@@ -51,7 +52,7 @@ class curiosity:
                     self.state_vals.append(0)
             else:
                 self.state_vals.append(0)
-        print("self.state_vals",self.state_vals)
+
         self.savemodel = savemodel
         self.CAM = camera
         self.ready = False
@@ -72,29 +73,32 @@ class curiosity:
 
     def preprocess_image(self, new_image):
         """
-        Splits the input image into blocks based on `self.split_values`.
+        Splits the input image into blocks based on `self.split_values`, which specifies [columns, rows].
         """
         new_image = cv2.cvtColor(new_image, cv2.COLOR_BGR2GRAY)
         height, width = new_image.shape
 
-        # Normalize split_values to determine rows and columns
-        # For example: [[0, 0]] -> [[2, 2]]
-        split_values = [
-            [x if x != 0 else 2, y if y != 0 else 2]  # Default to a 2x2 grid if 0
-            for x, y in self.split_values
-        ]
+        # Validate split_values
+        if not isinstance(self.split_values, list) or len(self.split_values) != 2:
+            raise ValueError("split_values must be a list of two integers: [columns, rows]")
+
+        cols, rows = self.split_values
+
+        # Default to single block if values are invalid
+        if cols <= 0:
+            cols = 1
+        if rows <= 0:
+            rows = 1
+
+        # Calculate block dimensions
+        block_width = width // cols
+        block_height = height // rows
 
         image_blocks = []
 
-        # Assuming split_values always contains one pair for now
-        row_split, col_split = split_values[0]  # Take the first pair
-
-        # Calculate block dimensions
-        block_height = height // row_split
-        block_width = width // col_split
-
-        for row in range(row_split):
-            for col in range(col_split):
+        # Iterate over rows and columns to split the image into blocks
+        for row in range(rows):
+            for col in range(cols):
                 # Extract each block
                 block = new_image[
                     row * block_height : (row + 1) * block_height,
@@ -105,10 +109,12 @@ class curiosity:
                 block = cv2.resize(block, (self.procesimgsize, self.procesimgsize))
                 block = torch.tensor(block, dtype=torch.float32).unsqueeze(0).unsqueeze(0) / 255.0
 
-                # Append to list
+                # Append to the list
                 image_blocks.append(block)
 
         return image_blocks
+
+
 
 
 
@@ -132,7 +138,6 @@ class curiosity:
 
         # Preprocess the image into blocks
         blocks = self.preprocess_image(self.new_image)
-        
 
         # Initialize list for MSE values
         mse_values = []
@@ -143,17 +148,19 @@ class curiosity:
             mse_values.append(mse * 1000)  # Scale MSE for readability
 
         # Generate summary of MSE values
-        mse_summary = " ".join([f"B{i+1}:{mse:.2f}" for i, mse in enumerate(mse_values)])
-        #mse_sum = sum(mse_values)
-        #mse_summary += f" SUM:{mse_sum:.2f}"
+        #mse_summary = " ".join([f"B{i+1}:{mse:.2f}" for i, mse in enumerate(mse_values)])
+        #print(mse_summary)
 
-        self.state_vals = mse_values  # Store MSE values for the blocks
+        # Update curiosity state
+        self.state_vals = mse_values
         self.CAM.curiosity_data = self.state_vals
-        #print(len(mse_values))
+
         # Update the model with all blocks at the end
         for block in blocks:
-            self.update_model_with_new_image(block, epochs=5)  # Use 1 epoch per block to avoid overfitting
+            self.update_model_with_new_image(block, epochs=1)
         sleep(self.pause)
+
+        
     def curiosity_process(self):
         while True:
             if self.ready:
