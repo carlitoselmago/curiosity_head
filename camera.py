@@ -21,18 +21,26 @@ class camera():
         cap = cv2.VideoCapture(self.cameraindex)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.HEIGHT)
-        cap.set(cv2.CAP_PROP_FPS, 24) # we read the stream at 30 fps
-     
+        cap.set(cv2.CAP_PROP_FPS, 24)  # we read the stream at 30 fps
+
         while cap.isOpened():
             ret, self.frame = cap.read()
             
-            if not ret: break
+            if not ret:
+                break
+            
+            # Apply a blur effect
+            strength=91 # use only odd numbers
+            blurred_frame = cv2.GaussianBlur(self.frame, (strength, strength), 0)  # Change (15, 15) to adjust blur strength
+            
             if self.preview:
-                #frame = self.paint_frame(self.frame)
-                cv2.imshow('frame', self.frame)
+                # Display the blurred frame
+                cv2.imshow('frame', blurred_frame)
                 cv2.waitKey(1)
-            self.put_with_drop(self.frame)
-            #self.frame_queue.put(self.frame)
+            
+            # Use the blurred frame for further processing
+            self.put_with_drop(blurred_frame)
+            # self.frame_queue.put(blurred_frame)
 
         cap.release()
     

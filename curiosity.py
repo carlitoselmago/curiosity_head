@@ -124,7 +124,7 @@ class curiosity:
         
         return mse
 
-    def update_model_with_new_image(self, image, epochs=10):
+    def update_model_with_new_image(self, image, epochs=2):
         for epoch in range(epochs):
             self.optimizer.zero_grad()
             output = self.autoencoder(image)

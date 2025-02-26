@@ -7,4 +7,5 @@ conda create -n YOURENVNAME python==3.11 conda-forge opencv cudatoolkit cudnn py
 with pip:
 serial
 numpy
+scikit-learn
 +git https://github.com/carlitoselmago/pyDMXController
