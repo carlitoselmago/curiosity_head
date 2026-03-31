@@ -3,8 +3,9 @@ import statistics as stats
 from curiosity import curiosity
 from camera import camera
 import time 
-from pyDMXController import pyDMXController
-dmx = pyDMXController(port='/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A50285BI-if00-port0', device_type='ftdi')
+from dmx_utils import create_dmx_controller
+
+dmx = create_dmx_controller(port='/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A50285BI-if00-port0', device_type='ftdi')
 
 
 #DMX vals
@@ -30,7 +31,7 @@ cameraindex=0
 CAM=camera(cameraindex=cameraindex,preview=True)
 CAM.start_cam()
 sleep(5)
-CST=curiosity(CAM,pause=0,split_values =[2,2])
+CST=curiosity(CAM,pause=0,split_values =[1,1], visualization_mode="activation_heatmap", movement_grid=[2,2])
 CST.start()
 
 #CSTg=curiosity(CAM,pause=0,split_values =[1,1])
@@ -62,7 +63,7 @@ while running:
     maxside=sides[maxindex]
     ratio=maxv-median
     suma=sum(CST.state_vals)
-    print("split view",CST.state_vals)
+    #print("split view",CST.state_vals)
 
     left=sum([CST.state_vals[0],CST.state_vals[2]])
     right=sum([CST.state_vals[1],CST.state_vals[3]])
@@ -78,8 +79,8 @@ while running:
 
     X+=(diffX/div)
     Y+=(diffY/div)
-    print("diff",diffX,diffY)
-    print("X,Y:",X,Y)
+    #print("diff",diffX,diffY)
+    #print("X,Y:",X,Y)
     #force max min values
     if X<0:
         X=10

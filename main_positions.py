@@ -4,8 +4,9 @@ from curiosity import curiosity
 from camera import camera
 import time 
 import numpy as np
-from pyDMXController import pyDMXController
-dmx = pyDMXController(port='/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A50285BI-if00-port0', device_type='ftdi')
+from dmx_utils import create_dmx_controller
+
+dmx = create_dmx_controller(port='/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A50285BI-if00-port0', device_type='ftdi')
 
 
 #DMX vals
@@ -31,12 +32,8 @@ cameraindex=0
 CAM=camera(cameraindex=cameraindex,preview=True)
 CAM.start_cam()
 sleep(5)
-CST=curiosity(CAM,pause=0,split_values =[2,2])
+CST=curiosity(CAM,pause=0,split_values =[1,1], visualization_mode="activation_heatmap", movement_grid=[2,2])
 CST.start()
-
-# general view
-CSTg=curiosity(CAM,pause=0,split_values =[1,1])
-CSTg.start()
 
 
 pos={}
@@ -59,7 +56,7 @@ while running:
     maxside=sides[maxindex]
     ratio=maxv-median
     suma=sum(CST.state_vals)
-    total=CSTg.state_vals[0]
+    total=sum(CST.state_vals) / len(CST.state_vals)
     #print("split view",CST.state_vals)
 
     left=sum([CST.state_vals[0],CST.state_vals[2]])

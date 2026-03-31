@@ -11,6 +11,9 @@ class camera():
         self.HEIGHT=720
         self.cameraindex=cameraindex
         self.STREAM_RESOLUTION = str(self.WIDTH)+"x"+str(self.HEIGHT)
+        self.frame = None
+        self.display_frame = None
+        self.curiosity_data = []
 
       
     def preview_capture(self,frame):
@@ -34,8 +37,10 @@ class camera():
             blurred_frame = cv2.GaussianBlur(self.frame, (strength, strength), 0)  # Change (15, 15) to adjust blur strength
             
             if self.preview:
-                # Display the blurred frame
-                cv2.imshow('frame', blurred_frame)
+                # Show the heatmap overlay when available, otherwise keep the
+                # existing preview behavior.
+                preview_frame = self.display_frame if self.display_frame is not None else blurred_frame
+                cv2.imshow('frame', preview_frame)
                 cv2.waitKey(1)
             
             # Use the blurred frame for further processing
