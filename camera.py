@@ -1,8 +1,10 @@
+import os
+# Must be set before cv2 is imported to suppress V4L2/backend noise on Linux
+os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 import cv2
 import threading
 from queue import Queue
 import numpy as np
-import os
 import time
 import warnings
 
@@ -70,8 +72,24 @@ class camera:
         except Exception as e:
             warnings.warn(f"Framebuffer write failed: {e}")
 
+    def _scan_camera_index(self):
+        """Try V4L2 indices 0-9 and return the first that delivers a frame."""
+        for idx in range(10):
+            cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                cap.release()
+                if ret:
+                    print(f"Auto-detected camera at index {idx}")
+                    return idx
+            cap.release()
+        print("No working camera found in indices 0-9, keeping configured index.")
+        return self.cameraindex
+
     def _open_camera(self):
-        cap = cv2.VideoCapture(self.cameraindex)
+        # CAP_V4L2 targets Linux V4L2 directly, avoiding depth-camera and other
+        # backend probes that flood stderr on Pi
+        cap = cv2.VideoCapture(self.cameraindex, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.HEIGHT)
         cap.set(cv2.CAP_PROP_FPS, 15)
@@ -113,6 +131,7 @@ class camera:
                 self.put_with_drop(frame)
 
     def start_cam(self):
+        self.cameraindex = self._scan_camera_index()
         self.frame_queue = Queue(maxsize=300)
         capture_thread = threading.Thread(target=self.get_frames, daemon=True)
         capture_thread.start()

@@ -1,4 +1,6 @@
 import os
+# Must be set before cv2 is imported to suppress V4L2/backend noise on Linux
+os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 import numpy as np
 import cv2
 import torch
