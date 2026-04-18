@@ -5,14 +5,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import threading
 from threading import Thread
 from time import sleep
 
+
 class Autoencoder(nn.Module):
-    def __init__(self, procesimgsize=32, params=12, size=6, size2=4):    
-    #def __init__(self, procesimgsize=64, params=32, size=6, size2=4):
+    def __init__(self, procesimgsize=32, params=8, size=5, size2=4):
         super(Autoencoder, self).__init__()
-        # Encoder
         self.encoder = nn.Sequential(
             nn.Conv2d(1, params, kernel_size=size, stride=1, padding="same"),
             nn.ReLU(),
@@ -21,7 +21,6 @@ class Autoencoder(nn.Module):
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=size2, stride=size2, padding=0)
         )
-        # Decoder
         self.decoder = nn.Sequential(
             nn.Conv2d(params, params, kernel_size=size, stride=1, padding="same"),
             nn.ReLU(),
@@ -32,29 +31,34 @@ class Autoencoder(nn.Module):
             nn.Conv2d(params, 1, kernel_size=size, stride=1, padding="same"),
             nn.Sigmoid()
         )
-    
+
     def forward(self, x):
         encoded = self.encoder(x)
         decoded = self.decoder(encoded)
         return decoded
 
+
 class curiosity:
     procesimgsize = 64
     saved_model_uri = "saved_model.pth"
-    
-    pause=0
+    pause = 0
 
-    def __init__(self, camera, pause=0,split_values = [1,1],savemodel=True, visualization_mode="heatmap", movement_grid=None):
-        self.split_values=split_values
-        self.pause=pause
+    def __init__(self, camera, pause=0, split_values=[1, 1], savemodel=True,
+                 visualization_mode="heatmap", movement_grid=None,
+                 frame_skip=2, cpu_affinity=None):
+        self.split_values = split_values
+        self.pause = pause
         self.visualization_mode = visualization_mode
         self.movement_grid = movement_grid if movement_grid is not None else split_values
         self.visual_smoothing_alpha = 0.25
         self.previous_visualization_map = None
+        self.frame_skip = frame_skip
+        # Default: use cores 0-1 for NN inference, leave 2-3 for camera and DMX
+        self.cpu_affinity = cpu_affinity if cpu_affinity is not None else {0, 1}
         movement_cols, movement_rows = self.movement_grid
         self.state_vals = [0] * (movement_cols * movement_rows)
-       
-        print("self.state_vals",self.state_vals)
+
+        print("self.state_vals", self.state_vals)
         self.savemodel = savemodel
         self.CAM = camera
         self.ready = False
@@ -64,8 +68,12 @@ class curiosity:
         self.criterion = nn.BCELoss()
 
         if os.path.isfile(self.saved_model_uri):
-            self.autoencoder.load_state_dict(torch.load(self.saved_model_uri))
-            self.autoencoder.eval()
+            try:
+                self.autoencoder.load_state_dict(torch.load(self.saved_model_uri))
+                self.autoencoder.eval()
+            except Exception as e:
+                print(f"Could not load saved model (architecture may have changed): {e}")
+                print("Starting with a new model.")
         else:
             print("No saved model found. Starting with a new model.")
 
@@ -81,25 +89,20 @@ class curiosity:
         grayscale_image = cv2.cvtColor(new_image, cv2.COLOR_BGR2GRAY)
         height, width = grayscale_image.shape
 
-        # Validate split_values
         if not isinstance(self.split_values, list) or len(self.split_values) != 2:
             raise ValueError("split_values must be a list of two integers: [columns, rows]")
 
         cols, rows = self.split_values
 
-        # Default to single block if values are invalid
         if cols <= 0:
             cols = 1
         if rows <= 0:
             rows = 1
 
-        # Calculate block dimensions
         block_width = width // cols
         block_height = height // rows
-
         image_blocks = []
 
-        # Iterate over rows and columns to split the image into blocks
         for row in range(rows):
             for col in range(cols):
                 y_start = row * block_height
@@ -107,30 +110,17 @@ class curiosity:
                 x_start = col * block_width
                 x_end = (col + 1) * block_width
 
-                # Extract each block
-                original_block = grayscale_image[
-                    y_start:y_end,
-                    x_start:x_end,
-                ]
-
-                # Resize once for the autoencoder and keep the source block size
-                # so the error map can be stitched back into the original frame.
+                original_block = grayscale_image[y_start:y_end, x_start:x_end]
                 resized_block = cv2.resize(original_block, (self.procesimgsize, self.procesimgsize))
                 block_tensor = torch.from_numpy(resized_block).unsqueeze(0).unsqueeze(0).float() / 255.0
 
-                image_blocks.append(
-                    {
-                        "tensor": block_tensor,
-                        "coords": (y_start, y_end, x_start, x_end),
-                        "shape": original_block.shape,
-                    }
-                )
+                image_blocks.append({
+                    "tensor": block_tensor,
+                    "coords": (y_start, y_end, x_start, x_end),
+                    "shape": original_block.shape,
+                })
 
         return grayscale_image, image_blocks
-
-
-
-
 
     def predict_and_calculate_mse(self, image):
         """
@@ -140,7 +130,6 @@ class curiosity:
         with torch.no_grad():
             decoded_image = self.autoencoder(image)
             error_map = torch.square(image - decoded_image)
-
         return error_map
 
     def predict_activation_heatmap(self, image):
@@ -153,9 +142,6 @@ class curiosity:
             encoded = self.autoencoder.encoder(image)
             decoded_image = self.autoencoder.decoder(encoded)
             error_map = torch.square(image - decoded_image)
-
-            # The encoder output is low-resolution, which naturally produces
-            # larger blob-like regions instead of pixel-level noise.
             activation_map = torch.mean(encoded, dim=1, keepdim=True)
             coarse_error_map = F.interpolate(error_map, size=encoded.shape[-2:], mode="area")
             activation_heatmap = activation_map * coarse_error_map
@@ -165,7 +151,6 @@ class curiosity:
                 mode="bilinear",
                 align_corners=False,
             )
-
         return error_map, activation_heatmap
 
     def calculate_scalar_mse(self, error_map):
@@ -255,10 +240,8 @@ class curiosity:
             sleep(self.pause)
             return
 
-        # Preprocess the image into blocks
         grayscale_image, blocks = self.preprocess_image(self.new_image)
 
-        # Initialize list for MSE values
         mse_values = []
         show_heatmap = self.visualization_mode in ("heatmap", "activation_heatmap") and getattr(self.CAM, "preview", False)
         use_full_score_map = show_heatmap or self.movement_grid != self.split_values
@@ -266,54 +249,98 @@ class curiosity:
         full_visualization_map = None
 
         if use_full_score_map:
-            # Preallocate the stitched score map so one forward pass can feed
-            # both movement decisions and the preview overlay.
             full_error_map = np.zeros(grayscale_image.shape, dtype=np.float32)
         if show_heatmap:
             full_visualization_map = np.zeros(grayscale_image.shape, dtype=np.float32)
 
-        # Predict and calculate MSE for each block
-        for block in blocks:
-            if self.visualization_mode == "activation_heatmap":
-                error_map, visualization_map = self.predict_activation_heatmap(block["tensor"])
-            else:
-                error_map = self.predict_and_calculate_mse(block["tensor"])
-                visualization_map = error_map
+        # Stack all block tensors for a single batched forward pass.
+        # Per-block MSE is numerically identical to the former single-sample loop
+        # because the autoencoder has no BatchNorm -- each sample is independent.
+        batch = torch.cat([b["tensor"] for b in blocks], dim=0)  # (N, 1, H, W)
 
-            mse_values.append(self.calculate_scalar_mse(error_map) * 1000)  # Scale MSE for readability
+        if self.visualization_mode == "activation_heatmap":
+            with torch.no_grad():
+                encoded = self.autoencoder.encoder(batch)
+                decoded = self.autoencoder.decoder(encoded)
+                error_batch = torch.square(batch - decoded)
+                activation = torch.mean(encoded, dim=1, keepdim=True)
+                coarse_err = F.interpolate(error_batch, size=encoded.shape[-2:], mode="area")
+                vis_batch = F.interpolate(
+                    activation * coarse_err,
+                    size=batch.shape[-2:],
+                    mode="bilinear",
+                    align_corners=False,
+                )
+        else:
+            with torch.no_grad():
+                decoded = self.autoencoder(batch)
+                error_batch = torch.square(batch - decoded)
+                vis_batch = error_batch
 
+        for i, block in enumerate(blocks):
+            error_map = error_batch[i:i+1]
+            vis_map = vis_batch[i:i+1]
+            mse_values.append(self.calculate_scalar_mse(error_map) * 1000)
             if full_error_map is not None:
                 self.stitch_block_map(full_error_map, error_map, block)
             if full_visualization_map is not None:
-                self.stitch_block_map(full_visualization_map, visualization_map, block)
+                self.stitch_block_map(full_visualization_map, vis_map, block)
 
-        # Generate summary of MSE values
-        #mse_summary = " ".join([f"B{i+1}:{mse:.2f}" for i, mse in enumerate(mse_values)])
-        #print(mse_summary)
-
-        # Update curiosity state
-        self.state_vals = self.calculate_region_scores(full_error_map) if full_error_map is not None and self.movement_grid != self.split_values else mse_values
+        self.state_vals = (
+            self.calculate_region_scores(full_error_map)
+            if full_error_map is not None and self.movement_grid != self.split_values
+            else mse_values
+        )
         self.CAM.curiosity_data = self.state_vals
-        if full_visualization_map is not None:
-            smoothed_visualization_map = self.smooth_visualization_map(full_visualization_map)
-            self.CAM.display_frame = self.build_error_overlay(grayscale_image, smoothed_visualization_map)
 
-        # Update the model with all blocks at the end
-        for block in blocks:
-            self.update_model_with_new_image(block["tensor"], epochs=1)
+        if full_visualization_map is not None:
+            smoothed = self.smooth_visualization_map(full_visualization_map)
+            self.CAM.display_frame = self.build_error_overlay(grayscale_image, smoothed)
+
+        # One batched Adam step instead of N individual steps. Gradient magnitude
+        # per element is the same (BCE uses mean reduction), but momentum state
+        # accumulates differently than N sequential steps. Acceptable for online
+        # learning where stability matters more than exact gradient matching.
+        self.update_model_with_new_image(batch, epochs=1)
         sleep(self.pause)
 
-        
     def curiosity_process(self):
+        try:
+            os.sched_setaffinity(0, self.cpu_affinity)
+        except AttributeError:
+            pass
+        # Limit PyTorch intraop threads so they stay within the pinned cores
+        torch.set_num_threads(2)
+
+        skip_counter = 0
         while True:
             if self.ready:
-                self.run_curiosity()
+                if skip_counter == 0:
+                    self.run_curiosity()
+                else:
+                    # Brief yield between skipped cycles to avoid spinning
+                    sleep(0.01)
+                skip_counter = (skip_counter + 1) % (self.frame_skip + 1)
             else:
                 sleep(1)
 
+    def _start_checkpoint_timer(self):
+        t = threading.Timer(600.0, self._periodic_checkpoint)
+        t.daemon = True
+        t.start()
+
+    def _periodic_checkpoint(self):
+        if self.savemodel:
+            try:
+                torch.save(self.autoencoder.state_dict(), self.saved_model_uri)
+            except Exception as e:
+                print(f"Periodic checkpoint failed: {e}")
+        self._start_checkpoint_timer()
+
     def start(self):
-        tc = Thread(target=self.curiosity_process)
+        tc = Thread(target=self.curiosity_process, daemon=True)
         tc.start()
+        self._start_checkpoint_timer()
 
     def end(self):
         if self.savemodel:

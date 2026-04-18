@@ -1,67 +1,115 @@
 import cv2
 import threading
 from queue import Queue
+import numpy as np
 import os
+import time
+import warnings
 
-class camera():
 
-    def __init__(self,cameraindex=0,preview=False):
-        self.preview=preview
-        self.WIDTH=1280
-        self.HEIGHT=720
-        self.cameraindex=cameraindex
-        self.STREAM_RESOLUTION = str(self.WIDTH)+"x"+str(self.HEIGHT)
+class camera:
+
+    def __init__(self, cameraindex=0, preview=False, cpu_affinity=None):
+        self.preview = preview
+        self.WIDTH = 720
+        self.HEIGHT = 576
+        self.cameraindex = cameraindex
+        self.STREAM_RESOLUTION = str(self.WIDTH) + "x" + str(self.HEIGHT)
         self.frame = None
         self.display_frame = None
         self.curiosity_data = []
+        # Default: leave cores 0-1 free for the NN/curiosity thread
+        self.cpu_affinity = cpu_affinity if cpu_affinity is not None else {2, 3}
+        self._fb = None
+        self._fb_width = 0
+        self._fb_height = 0
+        self._fb_bpp = 0
 
-      
-    def preview_capture(self,frame):
-        cv2.imshow("video", frame)
-        #frame = self.paint_frame(frame)
+        if self.preview:
+            self._init_framebuffer()
 
-    def get_frames(self):
+    def _init_framebuffer(self):
+        try:
+            with open('/sys/class/graphics/fb0/virtual_size', 'r') as f:
+                w, h = map(int, f.read().strip().split(','))
+            with open('/sys/class/graphics/fb0/bits_per_pixel', 'r') as f:
+                bpp = int(f.read().strip())
+            bytes_per_pixel = bpp // 8
+            fb_size = w * h * bytes_per_pixel
+            self._fb = np.memmap('/dev/fb0', dtype='uint8', mode='r+', shape=(fb_size,))
+            self._fb_width = w
+            self._fb_height = h
+            self._fb_bpp = bpp
+        except Exception as e:
+            warnings.warn(f"Framebuffer unavailable ({e}), disabling preview.")
+            self.preview = False
+            self._fb = None
+
+    @staticmethod
+    def _bgr_to_rgb565(bgr):
+        r = bgr[:, :, 2].astype(np.uint16)
+        g = bgr[:, :, 1].astype(np.uint16)
+        b = bgr[:, :, 0].astype(np.uint16)
+        return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
+    def _write_framebuffer(self, frame):
+        if self._fb is None:
+            return
+        resized = cv2.resize(frame, (self._fb_width, self._fb_height))
+        try:
+            if self._fb_bpp == 32:
+                bgra = cv2.cvtColor(resized, cv2.COLOR_BGR2BGRA)
+                self._fb[:] = bgra.flatten()
+            elif self._fb_bpp == 16:
+                rgb565 = self._bgr_to_rgb565(resized)
+                self._fb[:] = rgb565.flatten().view(np.uint8)
+            else:
+                warnings.warn(f"Unsupported framebuffer depth: {self._fb_bpp}bpp, disabling preview.")
+                self.preview = False
+                self._fb = None
+        except Exception as e:
+            warnings.warn(f"Framebuffer write failed: {e}")
+
+    def _open_camera(self):
         cap = cv2.VideoCapture(self.cameraindex)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.HEIGHT)
-        cap.set(cv2.CAP_PROP_FPS, 24)  # we read the stream at 30 fps
+        cap.set(cv2.CAP_PROP_FPS, 15)
+        return cap
 
-        while cap.isOpened():
-            ret, self.frame = cap.read()
-            
+    def get_frames(self):
+        try:
+            os.sched_setaffinity(0, self.cpu_affinity)
+        except AttributeError:
+            pass
+
+        cap = self._open_camera()
+
+        while True:
+            ret, frame = cap.read()
+
             if not ret:
-                break
-            
-            # Apply a blur effect
-            strength=91 # use only odd numbers
-            blurred_frame = cv2.GaussianBlur(self.frame, (strength, strength), 0)  # Change (15, 15) to adjust blur strength
-            
+                cap.release()
+                time.sleep(1)
+                cap = self._open_camera()
+                continue
+
+            self.frame = frame
+
             if self.preview:
-                # Show the heatmap overlay when available, otherwise keep the
-                # existing preview behavior.
-                preview_frame = self.display_frame if self.display_frame is not None else blurred_frame
-                cv2.imshow('frame', preview_frame)
-                cv2.waitKey(1)
-            
-            # Use the blurred frame for further processing
-            self.put_with_drop(blurred_frame)
-            # self.frame_queue.put(blurred_frame)
+                blurred = cv2.GaussianBlur(frame, (31, 31), 0)
+                preview_frame = self.display_frame if self.display_frame is not None else blurred
+                self._write_framebuffer(preview_frame)
+                self.put_with_drop(blurred)
+            else:
+                self.put_with_drop(frame)
 
-        cap.release()
-    
-    
     def start_cam(self):
-        self.frame_queue = Queue(maxsize=300)  # <-- Set a size limit for the queue
-
-        capture_thread = threading.Thread(target=self.get_frames)
+        self.frame_queue = Queue(maxsize=300)
+        capture_thread = threading.Thread(target=self.get_frames, daemon=True)
         capture_thread.start()
-        #capture_thread.join()
-        #cam_thread = threading.Thread(target=self.get_frames, args=(self.frame_queue,))
-        #cam_thread.start()
-        #cam_thread.join()
 
-        
     def put_with_drop(self, item):
         if self.frame_queue.full():
-            self.frame_queue.get()  # this removes the first item
+            self.frame_queue.get()
         self.frame_queue.put(item)
