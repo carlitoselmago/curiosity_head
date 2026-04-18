@@ -307,8 +307,8 @@ class curiosity:
     def curiosity_process(self):
         try:
             os.sched_setaffinity(0, self.cpu_affinity)
-        except AttributeError:
-            pass
+        except (AttributeError, OSError) as e:
+            print(f"Could not set curiosity thread affinity: {e}")
         # Limit PyTorch intraop threads so they stay within the pinned cores
         torch.set_num_threads(2)
 

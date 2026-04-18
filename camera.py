@@ -80,8 +80,8 @@ class camera:
     def get_frames(self):
         try:
             os.sched_setaffinity(0, self.cpu_affinity)
-        except AttributeError:
-            pass
+        except (AttributeError, OSError) as e:
+            print(f"Could not set camera thread affinity: {e}")
 
         cap = self._open_camera()
 
