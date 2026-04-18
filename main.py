@@ -54,22 +54,22 @@ def normalized(a, axis=-1, order=2):
     return a / np.expand_dims(l2, axis)
 
 while running:
-    
+    # Snapshot the list once so all reads in this iteration see the same values
+    sv = CST.state_vals[:]
+
     sides={0:"topleft",1:"topright",2:"bottomleft",3:"bottomright"}
-    #maxindex=index_min = max(range(len(CST.state_vals)), key=CST.state_vals.__getitem__)
-    maxv=max(CST.state_vals)
-    maxindex=CST.state_vals.index(maxv)
-    median=sum(CST.state_vals)/4
+    maxv=max(sv)
+    maxindex=sv.index(maxv)
+    median=sum(sv)/4
     maxside=sides[maxindex]
     ratio=maxv-median
-    suma=sum(CST.state_vals)
-    #print("split view",CST.state_vals)
+    suma=sum(sv)
 
-    left=sum([CST.state_vals[0],CST.state_vals[2]])
-    right=sum([CST.state_vals[1],CST.state_vals[3]])
+    left=sum([sv[0],sv[2]])
+    right=sum([sv[1],sv[3]])
 
-    top=sum([CST.state_vals[0],CST.state_vals[1]])
-    bottom=sum([CST.state_vals[2],CST.state_vals[3]])
+    top=sum([sv[0],sv[1]])
+    bottom=sum([sv[2],sv[3]])
 
     diffX=(left-right)
     diffY=(top-bottom)
