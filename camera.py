@@ -6,7 +6,6 @@ import threading
 from queue import Queue
 import numpy as np
 import time
-import warnings
 
 
 class camera:
@@ -32,20 +31,38 @@ class camera:
 
     def _init_framebuffer(self):
         try:
-            with open('/sys/class/graphics/fb0/virtual_size', 'r') as f:
-                w, h = map(int, f.read().strip().split(','))
+            # Use the physical display mode (e.g. "U:1920x1080-60") rather than
+            # virtual_size, which includes extra rows for double-buffering and
+            # can report padded widths that differ from the visible area.
+            with open('/sys/class/graphics/fb0/modes', 'r') as f:
+                mode_line = f.read().strip().split('\n')[0]  # take first mode
+            # format: "U:WxH-R" or "U:WxH"
+            dims = mode_line.split(':')[-1].split('-')[0]
+            w, h = map(int, dims.split('x'))
+
             with open('/sys/class/graphics/fb0/bits_per_pixel', 'r') as f:
                 bpp = int(f.read().strip())
-            bytes_per_pixel = bpp // 8
-            fb_size = w * h * bytes_per_pixel
+
+            # stride (bytes per row) may differ from w * bytes_per_pixel due to
+            # hardware alignment; use it to size the memmap correctly
+            stride_path = '/sys/class/graphics/fb0/stride'
+            if os.path.exists(stride_path):
+                with open(stride_path, 'r') as f:
+                    stride = int(f.read().strip())
+            else:
+                stride = w * (bpp // 8)
+
+            fb_size = stride * h
             self._fb = np.memmap('/dev/fb0', dtype='uint8', mode='r+', shape=(fb_size,))
             self._fb_width = w
             self._fb_height = h
             self._fb_bpp = bpp
-            print(f"Framebuffer: {w}x{h} {bpp}bpp -> /dev/fb0")
+            self._fb_stride = stride
+            print(f"Framebuffer: {w}x{h} {bpp}bpp stride={stride} -> /dev/fb0")
         except Exception as e:
             print(f"Framebuffer unavailable: {e}")
-            print("Preview disabled. Check: ls -la /dev/fb0  and  cat /sys/class/graphics/fb0/virtual_size")
+            print("  check: ls -la /dev/fb0   cat /sys/class/graphics/fb0/modes")
+            print("  if X11/desktop is running it will hide framebuffer output -- boot to console instead")
             self.preview = False
             self._fb = None
 
@@ -61,18 +78,29 @@ class camera:
             return
         resized = cv2.resize(frame, (self._fb_width, self._fb_height))
         try:
+            bpp_bytes = self._fb_bpp // 8
+            row_bytes = self._fb_width * bpp_bytes
+
             if self._fb_bpp == 32:
-                bgra = cv2.cvtColor(resized, cv2.COLOR_BGR2BGRA)
-                self._fb[:] = bgra.flatten()
+                pixel_data = cv2.cvtColor(resized, cv2.COLOR_BGR2BGRA)
             elif self._fb_bpp == 16:
-                rgb565 = self._bgr_to_rgb565(resized)
-                self._fb[:] = rgb565.flatten().view(np.uint8)
+                pixel_data = self._bgr_to_rgb565(resized).view(np.uint8).reshape(self._fb_height, row_bytes)
             else:
-                warnings.warn(f"Unsupported framebuffer depth: {self._fb_bpp}bpp, disabling preview.")
+                print(f"Unsupported framebuffer depth: {self._fb_bpp}bpp, disabling preview.")
                 self.preview = False
                 self._fb = None
+                return
+
+            if self._fb_stride == row_bytes:
+                # No padding -- write in one shot
+                self._fb[:] = pixel_data.flatten()
+            else:
+                # Stride differs from row width -- write row by row
+                for y in range(self._fb_height):
+                    offset = y * self._fb_stride
+                    self._fb[offset:offset + row_bytes] = pixel_data[y].flatten()
         except Exception as e:
-            warnings.warn(f"Framebuffer write failed: {e}")
+            print(f"Framebuffer write error: {e}")
 
     def _scan_camera_index(self):
         """Try V4L2 indices 0-9 and return the first that delivers a frame."""
