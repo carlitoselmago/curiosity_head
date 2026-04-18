@@ -69,8 +69,10 @@ class curiosity:
 
         if os.path.isfile(self.saved_model_uri):
             try:
-                self.autoencoder.load_state_dict(torch.load(self.saved_model_uri))
+                state = torch.load(self.saved_model_uri, map_location="cpu", weights_only=True)
+                self.autoencoder.load_state_dict(state)
                 self.autoencoder.eval()
+                print("Loaded saved model.")
             except Exception as e:
                 print(f"Could not load saved model (architecture may have changed): {e}")
                 print("Starting with a new model.")
