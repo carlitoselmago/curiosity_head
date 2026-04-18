@@ -47,6 +47,7 @@ boring_target=20
 lastX=""
 lastGV=0
 running=True
+last_status_print = 0
 
 def normalized(a, axis=-1, order=2):
     l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
@@ -73,15 +74,11 @@ while running:
 
     diffX=(left-right)
     diffY=(top-bottom)
-    #print("difference",diff)
 
     div=4
 
     X+=(diffX/div)
     Y+=(diffY/div)
-    #print("diff",diffX,diffY)
-    #print("X,Y:",X,Y)
-    #force max min values
     if X<0:
         X=10
     if X>255:
@@ -94,6 +91,13 @@ while running:
     dmx.update_channel(Xchan, int(X))
     dmx.update_channel(Ychan, int(Y))
     dmx.run(interval)
-    #sleep(interval)
+
+    now = time.time()
+    if now - last_status_print >= 2.0:
+        scores = " ".join(f"{v:.1f}" for v in sv)
+        print(f"curiosity={scores}  X={int(X)} Y={int(Y)}")
+        last_status_print = now
+
+    sleep(0.05)
 dmx.close()
 
