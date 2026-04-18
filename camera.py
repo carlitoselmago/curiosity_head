@@ -86,9 +86,17 @@ class camera:
         cap = self._open_camera()
 
         while True:
+            if not cap.isOpened():
+                print(f"Camera index {self.cameraindex} not available, retrying in 2s...")
+                cap.release()
+                time.sleep(2)
+                cap = self._open_camera()
+                continue
+
             ret, frame = cap.read()
 
             if not ret:
+                print(f"Camera read failed on index {self.cameraindex}, reconnecting...")
                 cap.release()
                 time.sleep(1)
                 cap = self._open_camera()
