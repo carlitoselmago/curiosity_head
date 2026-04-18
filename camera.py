@@ -42,8 +42,10 @@ class camera:
             self._fb_width = w
             self._fb_height = h
             self._fb_bpp = bpp
+            print(f"Framebuffer: {w}x{h} {bpp}bpp -> /dev/fb0")
         except Exception as e:
-            warnings.warn(f"Framebuffer unavailable ({e}), disabling preview.")
+            print(f"Framebuffer unavailable: {e}")
+            print("Preview disabled. Check: ls -la /dev/fb0  and  cat /sys/class/graphics/fb0/virtual_size")
             self.preview = False
             self._fb = None
 
