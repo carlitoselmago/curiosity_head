@@ -10,8 +10,11 @@ import time
 
 class camera:
 
-    def __init__(self, cameraindex=0, preview=False, cpu_affinity=None):
+    # display_backend: "framebuffer" (direct /dev/fb0, Pi/embedded) or
+    #                  "window"      (cv2.imshow, works on any desktop system)
+    def __init__(self, cameraindex=0, preview=False, cpu_affinity=None, display_backend="framebuffer"):
         self.preview = preview
+        self.display_backend = display_backend
         self.WIDTH = 720
         self.HEIGHT = 576
         self.cameraindex = cameraindex
@@ -26,7 +29,7 @@ class camera:
         self._fb_height = 0
         self._fb_bpp = 0
 
-        if self.preview:
+        if self.preview and self.display_backend == "framebuffer":
             self._init_framebuffer()
 
     def _init_framebuffer(self):
@@ -122,7 +125,7 @@ class camera:
         cap = cv2.VideoCapture(self.cameraindex, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.HEIGHT)
-        cap.set(cv2.CAP_PROP_FPS, 15)
+        cap.set(cv2.CAP_PROP_FPS, 24)
         return cap
 
     def get_frames(self):
@@ -155,7 +158,11 @@ class camera:
             if self.preview:
                 blurred = cv2.GaussianBlur(frame, (31, 31), 0)
                 preview_frame = self.display_frame if self.display_frame is not None else blurred
-                self._write_framebuffer(preview_frame)
+                if self.display_backend == "window":
+                    cv2.imshow("camera", preview_frame)
+                    cv2.waitKey(1)
+                else:
+                    self._write_framebuffer(preview_frame)
                 self.put_with_drop(blurred)
             else:
                 self.put_with_drop(frame)

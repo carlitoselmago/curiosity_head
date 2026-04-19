@@ -28,7 +28,7 @@ dmx.run(interval)
 
 #camera and curiosity vals
 cameraindex=0
-CAM=camera(cameraindex=cameraindex,preview=True)
+CAM=camera(cameraindex=cameraindex,preview=True,display_backend="window")
 CAM.start_cam()
 sleep(5)
 CST=curiosity(CAM,pause=0,split_values =[1,1], visualization_mode="activation_heatmap", movement_grid=[2,2])
