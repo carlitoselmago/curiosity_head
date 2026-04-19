@@ -29,9 +29,8 @@ class camera:
         self._screen = None
         self._disp_w = self.WIDTH
         self._disp_h = self.HEIGHT
-
-        if self.preview:
-            self._init_display()
+        # _init_display() is called from get_frames() so the SDL GL context is
+        # created and used in the same thread (SDL2 binds contexts per-thread)
 
     def _init_display(self):
         if self.display_backend == "kmsdrm":
@@ -105,6 +104,9 @@ class camera:
             os.sched_setaffinity(0, self.cpu_affinity)
         except (AttributeError, OSError) as e:
             print(f"Could not set camera thread affinity: {e}")
+
+        if self.preview:
+            self._init_display()
 
         cap = self._open_camera()
 
