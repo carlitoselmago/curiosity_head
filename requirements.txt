@@ -1,0 +1,6 @@
+# Pi 4 -- install torch from the ARM wheel, not PyPI:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch
+numpy
+opencv-python
+# pyDMXController  # uncomment when USB DMX dongle is connected
