@@ -15,6 +15,7 @@ from time import sleep
 class Autoencoder(nn.Module):
     def __init__(self, procesimgsize=32, params=8, size=5, size2=4):
         super(Autoencoder, self).__init__()
+        torch.set_num_threads(2)
         self.encoder = nn.Sequential(
             nn.Conv2d(1, params, kernel_size=size, stride=1, padding="same"),
             nn.ReLU(),
