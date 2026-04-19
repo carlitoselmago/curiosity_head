@@ -3,4 +3,5 @@
 torch
 numpy
 opencv-python
+pygame
 # pyDMXController  # uncomment when USB DMX dongle is connected
