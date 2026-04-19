@@ -125,7 +125,7 @@ class camera:
         cap = cv2.VideoCapture(self.cameraindex, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.HEIGHT)
-        cap.set(cv2.CAP_PROP_FPS, 15)
+        cap.set(cv2.CAP_PROP_FPS, 24)
         return cap
 
     def get_frames(self):
