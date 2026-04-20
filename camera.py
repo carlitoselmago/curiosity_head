@@ -39,6 +39,15 @@ class camera:
             os.environ['SDL_VIDEODRIVER'] = 'fbcon'
         # "window" leaves SDL_VIDEODRIVER unset so SDL auto-detects X11/Wayland
 
+        # SDL2 kmsdrm needs XDG_RUNTIME_DIR for DRM device access; systemd
+        # services don't set it automatically so derive it from the running UID
+        if 'XDG_RUNTIME_DIR' not in os.environ or not os.environ['XDG_RUNTIME_DIR']:
+            runtime_dir = f'/run/user/{os.getuid()}'
+            if not os.path.exists(runtime_dir):
+                runtime_dir = '/tmp'
+            os.environ['XDG_RUNTIME_DIR'] = runtime_dir
+            print(f"Set XDG_RUNTIME_DIR={runtime_dir}")
+
         try:
             pygame.init()
             info = pygame.display.Info()
