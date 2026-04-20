@@ -4,17 +4,18 @@ os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 import cv2
 import threading
 from queue import Queue
+import numpy as np
 import time
-import pygame
 
 
 class camera:
 
     # display_backend:
-    #   "kmsdrm" -- SDL2 fullscreen via KMS/DRM, no X11 needed (Pi headless)
-    #   "fbcon"  -- SDL2 fullscreen via framebuffer console (older Pi / fallback)
-    #   "window" -- SDL2 windowed, requires X11 or Wayland (desktop / debug)
-    def __init__(self, cameraindex=0, preview=False, cpu_affinity=None, display_backend="kmsdrm"):
+    #   "framebuffer" -- direct /dev/fb0 write, fastest, no X11 or pygame needed
+    #   "kmsdrm"      -- pygame/SDL2 fullscreen via KMS/DRM, no X11 needed
+    #   "fbcon"       -- pygame/SDL2 fullscreen via framebuffer console
+    #   "window"      -- pygame/SDL2 windowed, requires X11 or Wayland
+    def __init__(self, cameraindex=0, preview=False, cpu_affinity=None, display_backend="framebuffer"):
         self.preview = preview
         self.display_backend = display_backend
         self.WIDTH = 720
@@ -26,21 +27,62 @@ class camera:
         self.curiosity_data = []
         # Default: leave cores 0-1 free for the NN/curiosity thread
         self.cpu_affinity = cpu_affinity if cpu_affinity is not None else {2, 3}
+        # Framebuffer state
+        self._fb = None
+        self._fb_stride = 0
+        # Pygame state (lazy-initialised in get_frames thread)
         self._screen = None
         self._disp_w = self.WIDTH
         self._disp_h = self.HEIGHT
-        # _init_display() is called from get_frames() so the SDL GL context is
-        # created and used in the same thread (SDL2 binds contexts per-thread)
+
+    # ------------------------------------------------------------------
+    # Direct framebuffer path (/dev/fb0, RGB565)
+    # ------------------------------------------------------------------
+
+    def _init_fb(self):
+        try:
+            with open('/sys/class/graphics/fb0/stride', 'r') as f:
+                stride = int(f.read().strip())
+            fb_size = stride * self.HEIGHT
+            self._fb = np.memmap('/dev/fb0', dtype='uint8', mode='r+', shape=(fb_size,))
+            self._fb_stride = stride
+            print(f"Framebuffer: {self.WIDTH}x{self.HEIGHT} RGB565 stride={stride} -> /dev/fb0")
+        except Exception as e:
+            print(f"Framebuffer init failed: {e}")
+            self.preview = False
+            self._fb = None
+
+    @staticmethod
+    def _bgr_to_rgb565(bgr):
+        r = bgr[:, :, 2].astype(np.uint16)
+        g = bgr[:, :, 1].astype(np.uint16)
+        b = bgr[:, :, 0].astype(np.uint16)
+        return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
+    def _write_fb(self, frame):
+        if self._fb is None:
+            return
+        try:
+            # Camera and framebuffer are both 720x576 -- no resize needed
+            rgb565 = self._bgr_to_rgb565(frame)   # (H, W) uint16
+            self._fb[:] = rgb565.flatten().view(np.uint8)
+        except Exception as e:
+            print(f"Framebuffer write error: {e}")
+
+    # ------------------------------------------------------------------
+    # Pygame path (kmsdrm / fbcon / window)
+    # ------------------------------------------------------------------
 
     def _init_display(self):
+        import pygame
+
         if self.display_backend == "kmsdrm":
             os.environ['SDL_VIDEODRIVER'] = 'kmsdrm'
         elif self.display_backend == "fbcon":
             os.environ['SDL_VIDEODRIVER'] = 'fbcon'
         # "window" leaves SDL_VIDEODRIVER unset so SDL auto-detects X11/Wayland
 
-        # SDL2 kmsdrm needs XDG_RUNTIME_DIR for DRM device access; systemd
-        # services don't set it automatically so derive it from the running UID
+        # SDL2 kmsdrm needs XDG_RUNTIME_DIR; systemd services don't set it
         if 'XDG_RUNTIME_DIR' not in os.environ or not os.environ['XDG_RUNTIME_DIR']:
             runtime_dir = f'/run/user/{os.getuid()}'
             if not os.path.exists(runtime_dir):
@@ -57,7 +99,6 @@ class camera:
                 flags = pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF
             else:
                 flags = pygame.FULLSCREEN
-
             self._screen = pygame.display.set_mode((w, h), flags)
             self._disp_w = w
             self._disp_h = h
@@ -70,19 +111,22 @@ class camera:
             self._screen = None
 
     def _write_display(self, frame):
+        import pygame
         if self._screen is None:
             return
         try:
             resized = cv2.resize(frame, (self._disp_w, self._disp_h))
             rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-            # frombuffer avoids an extra numpy copy; rgb is contiguous after cvtColor
             surf = pygame.image.frombuffer(rgb, (self._disp_w, self._disp_h), 'RGB')
             self._screen.blit(surf, (0, 0))
             pygame.display.flip()
-            # Keep SDL event queue drained so the OS doesn't mark the app as hung
             pygame.event.pump()
         except Exception as e:
             print(f"Display write error: {e}")
+
+    # ------------------------------------------------------------------
+    # Camera capture
+    # ------------------------------------------------------------------
 
     def _scan_camera_index(self):
         """Try V4L2 indices 0-9 and return the first that delivers a frame."""
@@ -99,8 +143,6 @@ class camera:
         return self.cameraindex
 
     def _open_camera(self):
-        # CAP_V4L2 targets Linux V4L2 directly, avoiding depth-camera and other
-        # backend probes that flood stderr on Pi
         cap = cv2.VideoCapture(self.cameraindex, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.HEIGHT)
@@ -114,7 +156,10 @@ class camera:
             print(f"Could not set camera thread affinity: {e}")
 
         if self.preview:
-            self._init_display()
+            if self.display_backend == "framebuffer":
+                self._init_fb()
+            else:
+                self._init_display()
 
         cap = self._open_camera()
 
@@ -140,7 +185,10 @@ class camera:
             if self.preview:
                 blurred = cv2.GaussianBlur(frame, (31, 31), 0)
                 preview_frame = self.display_frame if self.display_frame is not None else blurred
-                self._write_display(preview_frame)
+                if self.display_backend == "framebuffer":
+                    self._write_fb(preview_frame)
+                else:
+                    self._write_display(preview_frame)
                 self.put_with_drop(blurred)
             else:
                 self.put_with_drop(frame)
