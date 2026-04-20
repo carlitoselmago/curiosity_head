@@ -34,6 +34,8 @@ class camera:
         self._screen = None
         self._disp_w = self.WIDTH
         self._disp_h = self.HEIGHT
+        # Latest frame for the dedicated display thread to consume
+        self._preview_frame = None
 
     # ------------------------------------------------------------------
     # Direct framebuffer path (/dev/fb0, RGB565)
@@ -68,6 +70,15 @@ class camera:
             self._fb[:] = rgb565.flatten().view(np.uint8)
         except Exception as e:
             print(f"Framebuffer write error: {e}")
+
+    def _fb_loop(self):
+        """Dedicated display thread -- writes at 15fps regardless of camera speed."""
+        interval = 1.0 / 15
+        while True:
+            frame = self._preview_frame
+            if frame is not None:
+                self._write_fb(frame)
+            time.sleep(interval)
 
     # ------------------------------------------------------------------
     # Pygame path (kmsdrm / fbcon / window)
@@ -155,11 +166,9 @@ class camera:
         except (AttributeError, OSError) as e:
             print(f"Could not set camera thread affinity: {e}")
 
-        if self.preview:
-            if self.display_backend == "framebuffer":
-                self._init_fb()
-            else:
-                self._init_display()
+        # Pygame display init must happen in the thread that will render
+        if self.preview and self.display_backend != "framebuffer":
+            self._init_display()
 
         cap = self._open_camera()
 
@@ -186,7 +195,8 @@ class camera:
                 blurred = cv2.GaussianBlur(frame, (31, 31), 0)
                 preview_frame = self.display_frame if self.display_frame is not None else blurred
                 if self.display_backend == "framebuffer":
-                    self._write_fb(preview_frame)
+                    # Hand off to the dedicated display thread; never blocks here
+                    self._preview_frame = preview_frame
                 else:
                     self._write_display(preview_frame)
                 self.put_with_drop(blurred)
@@ -196,6 +206,10 @@ class camera:
     def start_cam(self):
         self.cameraindex = self._scan_camera_index()
         self.frame_queue = Queue(maxsize=300)
+        if self.preview and self.display_backend == "framebuffer":
+            self._init_fb()
+            fb_thread = threading.Thread(target=self._fb_loop, daemon=True)
+            fb_thread.start()
         capture_thread = threading.Thread(target=self.get_frames, daemon=True)
         capture_thread.start()
 

@@ -17,13 +17,13 @@ Ychan=3
 dmx.update_channel(6, 255)  # Set general DIMMER to maximum
 
 dmx.update_channel(Xchan,X) 
-dmx.update_channel(10,10) # turn the light on 
+dmx.update_channel(10,20) # turn the light on 
 #dmx.update_channel(Ychan,Y) 
 interval=0.1
 dmx.run(interval)
 
 sleep(5)
-dmx.update_channel(5, 203) # set move speed to slow (the greater v the slower)
+dmx.update_channel(5, 240) # set move speed to slow (the greater v the slower)
 dmx.run(interval)
 
 #camera and curiosity vals
