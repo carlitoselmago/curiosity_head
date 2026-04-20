@@ -18,8 +18,8 @@ class camera:
     def __init__(self, cameraindex=0, preview=False, cpu_affinity=None, display_backend="framebuffer"):
         self.preview = preview
         self.display_backend = display_backend
-        self.WIDTH = 720
-        self.HEIGHT = 576
+        self.WIDTH = 640
+        self.HEIGHT = 480
         self.cameraindex = cameraindex
         self.STREAM_RESOLUTION = str(self.WIDTH) + "x" + str(self.HEIGHT)
         self.frame = None
@@ -30,6 +30,8 @@ class camera:
         # Framebuffer state
         self._fb = None
         self._fb_stride = 0
+        self._fb_width = self.WIDTH
+        self._fb_height = self.HEIGHT
         # Pygame state (lazy-initialised in get_frames thread)
         self._screen = None
         self._disp_w = self.WIDTH
@@ -43,12 +45,16 @@ class camera:
 
     def _init_fb(self):
         try:
+            with open('/sys/class/graphics/fb0/virtual_size', 'r') as f:
+                fb_w, fb_h = map(int, f.read().strip().split(','))
             with open('/sys/class/graphics/fb0/stride', 'r') as f:
                 stride = int(f.read().strip())
-            fb_size = stride * self.HEIGHT
+            fb_size = stride * fb_h
             self._fb = np.memmap('/dev/fb0', dtype='uint8', mode='r+', shape=(fb_size,))
             self._fb_stride = stride
-            print(f"Framebuffer: {self.WIDTH}x{self.HEIGHT} RGB565 stride={stride} -> /dev/fb0")
+            self._fb_width = fb_w
+            self._fb_height = fb_h
+            print(f"Framebuffer: {fb_w}x{fb_h} RGB565 stride={stride} -> /dev/fb0")
         except Exception as e:
             print(f"Framebuffer init failed: {e}")
             self.preview = False
@@ -65,7 +71,8 @@ class camera:
         if self._fb is None:
             return
         try:
-            # Camera and framebuffer are both 720x576 -- no resize needed
+            if frame.shape[1] != self._fb_width or frame.shape[0] != self._fb_height:
+                frame = cv2.resize(frame, (self._fb_width, self._fb_height))
             rgb565 = self._bgr_to_rgb565(frame)   # (H, W) uint16
             self._fb[:] = rgb565.flatten().view(np.uint8)
         except Exception as e:
