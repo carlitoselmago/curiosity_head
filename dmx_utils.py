@@ -23,8 +23,8 @@ def create_dmx_controller(port, device_type="ftdi"):
     implementation if the dependency or USB device is unavailable.
     """
     global _dmx_warning_logged
-    print("forced disabled dmx controller for debugging... dmx_utils.py")
-    return NullDMXController()
+    #print("forced disabled dmx controller for debugging... dmx_utils.py")
+    #return NullDMXController()
     try:
         from pyDMXController import pyDMXController
 
