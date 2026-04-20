@@ -55,6 +55,11 @@ class camera:
             self._fb_width = fb_w
             self._fb_height = fb_h
             print(f"Framebuffer: {fb_w}x{fb_h} RGB565 stride={stride} -> /dev/fb0")
+            try:
+                with open('/dev/tty1', 'wb') as tty:
+                    tty.write(b'\033[?25l')  # hide cursor
+            except Exception:
+                pass
         except Exception as e:
             print(f"Framebuffer init failed: {e}")
             self.preview = False
