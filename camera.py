@@ -140,8 +140,8 @@ class camera:
     # ------------------------------------------------------------------
 
     def _scan_camera_index(self):
-        """Try V4L2 indices 0-9 and return the first that delivers a frame."""
-        for idx in range(10):
+        """Try V4L2 indices 0-3 and return the first that delivers a frame."""
+        for idx in range(4):
             cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
             if cap.isOpened():
                 ret, _ = cap.read()
