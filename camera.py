@@ -41,14 +41,13 @@ class camera:
 
         try:
             pygame.init()
+            info = pygame.display.Info()
+            w = info.current_w if info.current_w > 0 else self.WIDTH
+            h = info.current_h if info.current_h > 0 else self.HEIGHT
             if self.display_backend in ("kmsdrm", "fbcon"):
-                info = pygame.display.Info()
-                w = info.current_w if info.current_w > 0 else self.WIDTH
-                h = info.current_h if info.current_h > 0 else self.HEIGHT
                 flags = pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF
             else:
-                w, h = self.WIDTH, self.HEIGHT
-                flags = 0
+                flags = pygame.FULLSCREEN
 
             self._screen = pygame.display.set_mode((w, h), flags)
             self._disp_w = w
