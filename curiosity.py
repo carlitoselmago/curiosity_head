@@ -68,6 +68,7 @@ class curiosity:
         self.CAM = camera
         self.ready = False
         self._resetting = False
+        self._update_lock = threading.Lock()
         self.autoencoder = Autoencoder(self.procesimgsize)
         self.autoencoder.train()
         self.optimizer = optim.Adam(self.autoencoder.parameters(), lr=0.001)
@@ -235,13 +236,12 @@ class curiosity:
         return smoothed_map
 
     def update_model_with_new_image(self, image):
-        if self._resetting:
-            return  # skip backward while weights are being interpolated
-        self.optimizer.zero_grad()
-        output = self.autoencoder(image)
-        loss = self.criterion(output, image)
-        loss.backward()
-        self.optimizer.step()
+        with self._update_lock:
+            self.optimizer.zero_grad()
+            output = self.autoencoder(image)
+            loss = self.criterion(output, image)
+            loss.backward()
+            self.optimizer.step()
 
     def run_curiosity(self):
         self.new_image = getattr(self.CAM, "frame", None)
@@ -267,7 +267,6 @@ class curiosity:
         # because the autoencoder has no BatchNorm -- each sample is independent.
         batch = torch.cat([b["tensor"] for b in blocks], dim=0)  # (N, 1, H, W)
 
-        self.autoencoder.eval()  # disable dropout for stable, deterministic inference
         if self.visualization_mode == "activation_heatmap":
             with torch.no_grad():
                 encoded = self.autoencoder.encoder(batch)
@@ -286,7 +285,6 @@ class curiosity:
                 decoded = self.autoencoder(batch)
                 error_batch = torch.square(batch - decoded)
                 vis_batch = error_batch
-        self.autoencoder.train()  # re-enable dropout for the weight update below
 
         for i, block in enumerate(blocks):
             error_map = error_batch[i:i+1]
@@ -359,11 +357,14 @@ class curiosity:
         step_time = duration / steps
         for i in range(1, steps + 1):
             alpha = i / steps
-            with torch.no_grad():
-                for name, param in self.autoencoder.named_parameters():
-                    target = (1 - alpha) * current_state[name] + alpha * fresh_state[name]
-                    param.data.copy_(target)
+            with self._update_lock:  # wait for any in-progress backward before touching weights
+                with torch.no_grad():
+                    for name, param in self.autoencoder.named_parameters():
+                        target = (1 - alpha) * current_state[name] + alpha * fresh_state[name]
+                        param.data.copy_(target)
             sleep(step_time)
+        with self._update_lock:
+            self.optimizer = optim.Adam(self.autoencoder.parameters(), lr=0.001)
         self._resetting = False
         print("Weight reset complete -- model is now fresh")
         self._start_reset_timer()
