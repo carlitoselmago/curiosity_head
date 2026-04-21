@@ -1,8 +1,8 @@
 from time import sleep
-import statistics as stats
+import math
 from curiosity import curiosity
 from camera import camera
-import time 
+import time
 from dmx_utils import create_dmx_controller
 
 dmx = create_dmx_controller(port='/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A50285BI-if00-port0', device_type='ftdi')
@@ -20,6 +20,11 @@ X_MIN = 0
 X_MAX = 80
 Y_MIN = 0
 Y_MAX = 80
+
+#Exploration
+EXPLORATION_WEIGHT = 10.0  # boost for undervisited regions; raise to explore more
+LIMIT_MARGIN = 10          # DMX units from limit where repulsion kicks in
+LIMIT_PUSH = 3             # DMX units pushed away from limit per frame
 
 dmx.update_channel(6, 255)  # Set general DIMMER to maximum
 
@@ -46,49 +51,48 @@ CST.start()
 #CSTg.start()
 
 
-Xhist=[]
-Xhist_max=20
-meanX=0
-
-movespeed=0.5
-boring_target=20
-lastX=""
-lastGV=0
-running=True
+running = True
 last_status_print = 0
 
-def normalized(a, axis=-1, order=2):
-    l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
-    l2[l2==0] = 1
-    return a / np.expand_dims(l2, axis)
+# UCB1 exploration state: one count per movement grid region (topleft, topright, bottomleft, bottomright)
+region_counts = [1] * 4
+total_steps = 4
 
 while running:
-    # Snapshot the list once so all reads in this iteration see the same values
+    # Snapshot so the curiosity thread can't mutate the list mid-loop
     sv = CST.state_vals[:]
 
-    sides={0:"topleft",1:"topright",2:"bottomleft",3:"bottomright"}
-    maxv=max(sv)
-    maxindex=sv.index(maxv)
-    median=sum(sv)/4
-    maxside=sides[maxindex]
-    ratio=maxv-median
-    suma=sum(sv)
+    # UCB1 exploration bonus: regions visited less get a higher bonus
+    log_total = math.log(total_steps)
+    adj = [sv[i] + EXPLORATION_WEIGHT * math.sqrt(log_total / region_counts[i]) for i in range(4)]
 
-    left=sum([sv[0],sv[2]])
-    right=sum([sv[1],sv[3]])
+    left  = adj[0] + adj[2]
+    right = adj[1] + adj[3]
+    top   = adj[0] + adj[1]
+    bottom= adj[2] + adj[3]
 
-    top=sum([sv[0],sv[1]])
-    bottom=sum([sv[2],sv[3]])
+    diffX = left - right
+    diffY = top - bottom
 
-    diffX=(left-right)
-    diffY=(top-bottom)
-
-    div=4
-
-    X+=(diffX/div)
-    Y+=(diffY/div)
+    X += diffX / 4
+    Y += diffY / 4
     X = max(X_MIN, min(X_MAX, X))
     Y = max(Y_MIN, min(Y_MAX, Y))
+
+    # Repel from limits so the head doesn't lock on boundaries
+    if X <= X_MIN + LIMIT_MARGIN:
+        X += LIMIT_PUSH
+    elif X >= X_MAX - LIMIT_MARGIN:
+        X -= LIMIT_PUSH
+    if Y <= Y_MIN + LIMIT_MARGIN:
+        Y += LIMIT_PUSH
+    elif Y >= Y_MAX - LIMIT_MARGIN:
+        Y -= LIMIT_PUSH
+
+    # Record which region curiosity pulled toward (raw score, not adjusted)
+    winner = sv.index(max(sv))
+    region_counts[winner] += 1
+    total_steps += 1
 
     dmx.update_channel(Xchan, int(X))
     dmx.update_channel(Ychan, int(Y))
@@ -97,7 +101,8 @@ while running:
     now = time.time()
     if now - last_status_print >= 2.0:
         scores = " ".join(f"{v:.1f}" for v in sv)
-        print(f"curiosity={scores}  X={int(X)} Y={int(Y)}")
+        visits = " ".join(str(c) for c in region_counts)
+        print(f"curiosity={scores}  visits={visits}  X={int(X)} Y={int(Y)}")
         last_status_print = now
 
     sleep(0.05)
