@@ -34,6 +34,16 @@ CAM = camera(cameraindex=cameraindex, preview=True, display_backend="framebuffer
 CAM.start_cam()
 sleep(5)
 CST = curiosity(CAM, pause=0, split_values=[1,1], visualization_mode="activation_heatmap", movement_grid=[2,2])
+
+def on_reset():
+    global X, Y
+    X = (X_MIN + X_MAX) / 2
+    Y = (Y_MIN + Y_MAX) / 2
+    dmx.update_channel(Xchan, int(X))
+    dmx.update_channel(Ychan, int(Y))
+    dmx.run(interval)
+
+CST.on_reset_start = on_reset
 CST.start()
 
 running = True

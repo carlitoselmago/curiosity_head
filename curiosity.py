@@ -69,6 +69,7 @@ class curiosity:
         self.ready = False
         self._resetting = False
         self._update_lock = threading.Lock()
+        self.on_reset_start = None  # optional callback fired when reset begins
         self.autoencoder = Autoencoder(self.procesimgsize)
         self.autoencoder.train()
         self.optimizer = optim.Adam(self.autoencoder.parameters(), lr=0.001)
@@ -352,6 +353,8 @@ class curiosity:
     def _gradual_weight_reset(self, duration=10.0, steps=20):
         print("Weight reset started -- interpolating to fresh weights over 10 seconds")
         self._resetting = True
+        if callable(self.on_reset_start):
+            self.on_reset_start()
         current_state = {k: v.clone() for k, v in self.autoencoder.named_parameters()}
         fresh_state = {k: v.clone() for k, v in Autoencoder(self.procesimgsize).named_parameters()}
         step_time = duration / steps
