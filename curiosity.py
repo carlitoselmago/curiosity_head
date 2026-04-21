@@ -67,6 +67,7 @@ class curiosity:
         self.savemodel = savemodel
         self.CAM = camera
         self.ready = False
+        self._resetting = False
         self.autoencoder = Autoencoder(self.procesimgsize)
         self.autoencoder.train()
         self.optimizer = optim.Adam(self.autoencoder.parameters(), lr=0.001)
@@ -234,6 +235,8 @@ class curiosity:
         return smoothed_map
 
     def update_model_with_new_image(self, image):
+        if self._resetting:
+            return  # skip backward while weights are being interpolated
         self.optimizer.zero_grad()
         output = self.autoencoder(image)
         loss = self.criterion(output, image)
@@ -324,9 +327,12 @@ class curiosity:
         while True:
             if self.ready:
                 if skip_counter == 0:
-                    self.run_curiosity()
+                    try:
+                        self.run_curiosity()
+                    except Exception as e:
+                        print(f"curiosity error (continuing): {e}")
+                        sleep(0.1)
                 else:
-                    # Brief yield between skipped cycles to avoid spinning
                     sleep(0.01)
                 skip_counter = (skip_counter + 1) % (self.frame_skip + 1)
             else:
@@ -347,6 +353,7 @@ class curiosity:
 
     def _gradual_weight_reset(self, duration=10.0, steps=20):
         print("Weight reset started -- interpolating to fresh weights over 10 seconds")
+        self._resetting = True
         current_state = {k: v.clone() for k, v in self.autoencoder.named_parameters()}
         fresh_state = {k: v.clone() for k, v in Autoencoder(self.procesimgsize).named_parameters()}
         step_time = duration / steps
@@ -357,6 +364,7 @@ class curiosity:
                     target = (1 - alpha) * current_state[name] + alpha * fresh_state[name]
                     param.data.copy_(target)
             sleep(step_time)
+        self._resetting = False
         print("Weight reset complete -- model is now fresh")
         self._start_reset_timer()
 
