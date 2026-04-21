@@ -264,6 +264,7 @@ class curiosity:
         # because the autoencoder has no BatchNorm -- each sample is independent.
         batch = torch.cat([b["tensor"] for b in blocks], dim=0)  # (N, 1, H, W)
 
+        self.autoencoder.eval()  # disable dropout for stable, deterministic inference
         if self.visualization_mode == "activation_heatmap":
             with torch.no_grad():
                 encoded = self.autoencoder.encoder(batch)
@@ -282,6 +283,7 @@ class curiosity:
                 decoded = self.autoencoder(batch)
                 error_batch = torch.square(batch - decoded)
                 vis_batch = error_batch
+        self.autoencoder.train()  # re-enable dropout for the weight update below
 
         for i, block in enumerate(blocks):
             error_map = error_batch[i:i+1]
