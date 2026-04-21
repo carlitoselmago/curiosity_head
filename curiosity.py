@@ -10,10 +10,12 @@ import torch.optim as optim
 import threading
 from threading import Thread
 from time import sleep
+from collections import deque
+import random
 
 
 class Autoencoder(nn.Module):
-    def __init__(self, procesimgsize=32, params=8, size=5, size2=4):
+    def __init__(self, procesimgsize=32, params=16, size=5, size2=4):
         super(Autoencoder, self).__init__()
         torch.set_num_threads(2)
         self.encoder = nn.Sequential(
@@ -48,7 +50,7 @@ class curiosity:
 
     def __init__(self, camera, pause=0, split_values=[1, 1], savemodel=True,
                  visualization_mode="heatmap", movement_grid=None,
-                 frame_skip=2, cpu_affinity=None):
+                 frame_skip=2, cpu_affinity=None, replay_buffer_size=1000):
         self.split_values = split_values
         self.pause = pause
         self.visualization_mode = visualization_mode
@@ -65,6 +67,7 @@ class curiosity:
         self.savemodel = savemodel
         self.CAM = camera
         self.ready = False
+        self.replay_buffer = deque(maxlen=replay_buffer_size)
         self.autoencoder = Autoencoder(self.procesimgsize)
         self.autoencoder.train()
         self.optimizer = optim.Adam(self.autoencoder.parameters(), lr=0.001)
@@ -231,11 +234,25 @@ class curiosity:
         self.previous_visualization_map = smoothed_map
         return smoothed_map
 
-    def update_model_with_new_image(self, image, epochs=2):
-        for epoch in range(epochs):
+    def update_model_with_new_image(self, image):
+        # Train on current batch
+        self.optimizer.zero_grad()
+        output = self.autoencoder(image)
+        loss = self.criterion(output, image)
+        loss.backward()
+        self.optimizer.step()
+
+        # Store current frames so past scenes are not forgotten
+        for i in range(image.shape[0]):
+            self.replay_buffer.append(image[i:i+1].detach().clone())
+
+        # Replay a random sample of past frames alongside the current one
+        if len(self.replay_buffer) >= 4:
+            n = min(image.shape[0] * 2, len(self.replay_buffer))
+            replay = torch.cat(random.sample(list(self.replay_buffer), n), dim=0)
             self.optimizer.zero_grad()
-            output = self.autoencoder(image)
-            loss = self.criterion(output, image)
+            output = self.autoencoder(replay)
+            loss = self.criterion(output, replay)
             loss.backward()
             self.optimizer.step()
 
@@ -306,7 +323,7 @@ class curiosity:
         # per element is the same (BCE uses mean reduction), but momentum state
         # accumulates differently than N sequential steps. Acceptable for online
         # learning where stability matters more than exact gradient matching.
-        self.update_model_with_new_image(batch, epochs=1)
+        self.update_model_with_new_image(batch)
         sleep(self.pause)
 
     def curiosity_process(self):
