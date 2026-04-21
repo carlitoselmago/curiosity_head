@@ -345,16 +345,15 @@ class curiosity:
 
     def _gradual_weight_reset(self, duration=10.0, steps=20):
         print("Weight reset started -- interpolating to fresh weights over 10 seconds")
-        current_state = {k: v.clone() for k, v in self.autoencoder.state_dict().items()}
-        fresh_state = Autoencoder(self.procesimgsize).state_dict()
+        current_state = {k: v.clone() for k, v in self.autoencoder.named_parameters()}
+        fresh_state = {k: v.clone() for k, v in Autoencoder(self.procesimgsize).named_parameters()}
         step_time = duration / steps
         for i in range(1, steps + 1):
             alpha = i / steps
-            interpolated = {
-                k: ((1 - alpha) * current_state[k].float() + alpha * fresh_state[k].float())
-                for k in current_state
-            }
-            self.autoencoder.load_state_dict(interpolated)
+            with torch.no_grad():
+                for name, param in self.autoencoder.named_parameters():
+                    target = (1 - alpha) * current_state[name] + alpha * fresh_state[name]
+                    param.data.copy_(target)
             sleep(step_time)
         print("Weight reset complete -- model is now fresh")
         self._start_reset_timer()
