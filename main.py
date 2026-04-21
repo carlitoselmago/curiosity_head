@@ -66,6 +66,14 @@ def current_zone(x, y):
     row = 1 if y > y_mid else 0
     return row * 2 + col  # 0=topleft 1=topright 2=bottomleft 3=bottomright
 
+def zone_center(z):
+    """Return the DMX center coordinates of a zone."""
+    qx = (X_MAX - X_MIN) / 4
+    qy = (Y_MAX - Y_MIN) / 4
+    col = z % 2
+    row = z // 2
+    return X_MIN + qx * (1 + 2 * col), Y_MIN + qy * (1 + 2 * row)
+
 while running:
     # Snapshot so the curiosity thread can't mutate the list mid-loop
     sv = CST.state_vals[:]
@@ -89,8 +97,18 @@ while running:
     diffX = left - right
     diffY = top - bottom
 
-    X += diffX / 4
-    Y += diffY / 4
+    new_X = X + diffX / 4
+    new_Y = Y + diffY / 4
+
+    # If the move stays in the same zone, redirect toward the least-bored other zone
+    if current_zone(new_X, new_Y) == zone:
+        other = min((zone_boredom[i], i) for i in range(4) if i != zone)[1]
+        tx, ty = zone_center(other)
+        step = max(X_MAX - X_MIN, Y_MAX - Y_MIN) / 8
+        new_X += step * (1 if tx > new_X else -1)
+        new_Y += step * (1 if ty > new_Y else -1)
+
+    X, Y = new_X, new_Y
     X = max(X_MIN, min(X_MAX, X))
     Y = max(Y_MIN, min(Y_MAX, Y))
 
