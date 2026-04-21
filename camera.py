@@ -183,6 +183,7 @@ class camera:
             self._init_display()
 
         cap = self._open_camera()
+        consecutive_failures = 0
 
         while True:
             if not cap.isOpened():
@@ -190,17 +191,22 @@ class camera:
                 cap.release()
                 time.sleep(2)
                 cap = self._open_camera()
+                consecutive_failures = 0
                 continue
 
             ret, frame = cap.read()
 
             if not ret:
-                print(f"Camera read failed on index {self.cameraindex}, reconnecting...")
-                cap.release()
-                time.sleep(1)
-                cap = self._open_camera()
+                consecutive_failures += 1
+                if consecutive_failures >= 5:
+                    print(f"Camera read failed {consecutive_failures}x on index {self.cameraindex}, reopening...")
+                    cap.release()
+                    time.sleep(0.5)
+                    cap = self._open_camera()
+                    consecutive_failures = 0
                 continue
 
+            consecutive_failures = 0
             self.frame = frame
 
             if self.preview:

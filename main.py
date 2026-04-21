@@ -15,6 +15,12 @@ Y=0
 Xchan=1
 Ychan=3
 
+#Rotation limits
+X_MIN = 0
+X_MAX = 80
+Y_MIN = 0
+Y_MAX = 80
+
 dmx.update_channel(6, 255)  # Set general DIMMER to maximum
 
 dmx.update_channel(Xchan,X) 
@@ -81,14 +87,8 @@ while running:
 
     X+=(diffX/div)
     Y+=(diffY/div)
-    if X<0:
-        X=10
-    if X>255:
-        X=205
-    if Y<0:
-       Y=10
-    if Y>170:
-        Y=150
+    X = max(X_MIN, min(X_MAX, X))
+    Y = max(Y_MIN, min(Y_MAX, Y))
 
     dmx.update_channel(Xchan, int(X))
     dmx.update_channel(Ychan, int(Y))
