@@ -343,10 +343,32 @@ class curiosity:
                 print(f"Periodic checkpoint failed: {e}")
         self._start_checkpoint_timer()
 
+    def _gradual_weight_reset(self, duration=10.0, steps=20):
+        print("Weight reset started -- interpolating to fresh weights over 10 seconds")
+        current_state = {k: v.clone() for k, v in self.autoencoder.state_dict().items()}
+        fresh_state = Autoencoder(self.procesimgsize).state_dict()
+        step_time = duration / steps
+        for i in range(1, steps + 1):
+            alpha = i / steps
+            interpolated = {
+                k: ((1 - alpha) * current_state[k].float() + alpha * fresh_state[k].float())
+                for k in current_state
+            }
+            self.autoencoder.load_state_dict(interpolated)
+            sleep(step_time)
+        print("Weight reset complete -- model is now fresh")
+        self._start_reset_timer()
+
+    def _start_reset_timer(self):
+        t = threading.Timer(15 * 60, lambda: Thread(target=self._gradual_weight_reset, daemon=True).start())
+        t.daemon = True
+        t.start()
+
     def start(self):
         tc = Thread(target=self.curiosity_process, daemon=True)
         tc.start()
         self._start_checkpoint_timer()
+        self._start_reset_timer()
 
     def end(self):
         if self.savemodel:
