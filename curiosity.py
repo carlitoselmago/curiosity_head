@@ -370,7 +370,7 @@ class curiosity:
         self._start_reset_timer()
 
     def _start_reset_timer(self):
-        t = threading.Timer(15 * 60, lambda: Thread(target=self._gradual_weight_reset, daemon=True).start())
+        t = threading.Timer(5 * 60, lambda: Thread(target=self._gradual_weight_reset, daemon=True).start())
         t.daemon = True
         t.start()
 
