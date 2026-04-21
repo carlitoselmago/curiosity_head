@@ -48,7 +48,7 @@ class curiosity:
     saved_model_uri = "saved_model.pth"
     pause = 0
 
-    def __init__(self, camera, pause=0, split_values=[1, 1], savemodel=True,
+    def __init__(self, camera, pause=0, split_values=[1, 1], savemodel=False,
                  visualization_mode="heatmap", movement_grid=None,
                  frame_skip=2, cpu_affinity=None):
         self.split_values = split_values
