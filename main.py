@@ -1,5 +1,4 @@
 from time import sleep
-import math
 from curiosity import curiosity
 from camera import camera
 import time
@@ -21,10 +20,12 @@ X_MAX = 80
 Y_MIN = 0
 Y_MAX = 80
 
-#Exploration
-EXPLORATION_WEIGHT = 10.0  # boost for undervisited regions; raise to explore more
-LIMIT_MARGIN = 10          # DMX units from limit where repulsion kicks in
-LIMIT_PUSH = 3             # DMX units pushed away from limit per frame
+#Exploration / boredom
+BOREDOM_GROWTH = 2.0   # score units subtracted per frame while head is in that zone
+BOREDOM_DECAY  = 0.5   # score units recovered per frame while head is NOT in that zone
+MAX_BOREDOM    = 150   # cap; raise if head still gets stuck, lower if it moves too restlessly
+LIMIT_MARGIN   = 10    # DMX units from limit where repulsion kicks in
+LIMIT_PUSH     = 3     # DMX units pushed away from limit per frame
 
 dmx.update_channel(6, 255)  # Set general DIMMER to maximum
 
@@ -54,17 +55,31 @@ CST.start()
 running = True
 last_status_print = 0
 
-# UCB1 exploration state: one count per movement grid region (topleft, topright, bottomleft, bottomright)
-region_counts = [1] * 4
-total_steps = 4
+# Boredom state: one value per movement grid region (topleft, topright, bottomleft, bottomright)
+zone_boredom = [0.0] * 4
+
+def current_zone(x, y):
+    """Map the current DMX position to one of the four movement grid zones."""
+    x_mid = (X_MIN + X_MAX) / 2
+    y_mid = (Y_MIN + Y_MAX) / 2
+    col = 1 if x > x_mid else 0
+    row = 1 if y > y_mid else 0
+    return row * 2 + col  # 0=topleft 1=topright 2=bottomleft 3=bottomright
 
 while running:
     # Snapshot so the curiosity thread can't mutate the list mid-loop
     sv = CST.state_vals[:]
 
-    # UCB1 exploration bonus: regions visited less get a higher bonus
-    log_total = math.log(total_steps)
-    adj = [sv[i] + EXPLORATION_WEIGHT * math.sqrt(log_total / region_counts[i]) for i in range(4)]
+    # Grow boredom in whichever zone the head is physically in, decay all others
+    zone = current_zone(X, Y)
+    for i in range(4):
+        if i == zone:
+            zone_boredom[i] = min(zone_boredom[i] + BOREDOM_GROWTH, MAX_BOREDOM)
+        else:
+            zone_boredom[i] = max(0.0, zone_boredom[i] - BOREDOM_DECAY)
+
+    # Subtract boredom from curiosity scores so overvisited zones become less attractive
+    adj = [max(0.0, sv[i] - zone_boredom[i]) for i in range(4)]
 
     left  = adj[0] + adj[2]
     right = adj[1] + adj[3]
@@ -89,20 +104,15 @@ while running:
     elif Y >= Y_MAX - LIMIT_MARGIN:
         Y -= LIMIT_PUSH
 
-    # Record which region curiosity pulled toward (raw score, not adjusted)
-    winner = sv.index(max(sv))
-    region_counts[winner] += 1
-    total_steps += 1
-
     dmx.update_channel(Xchan, int(X))
     dmx.update_channel(Ychan, int(Y))
     dmx.run(interval)
 
     now = time.time()
     if now - last_status_print >= 2.0:
-        scores = " ".join(f"{v:.1f}" for v in sv)
-        visits = " ".join(str(c) for c in region_counts)
-        print(f"curiosity={scores}  visits={visits}  X={int(X)} Y={int(Y)}")
+        scores  = " ".join(f"{v:.1f}" for v in sv)
+        boredom = " ".join(f"{b:.0f}" for b in zone_boredom)
+        print(f"curiosity={scores}  boredom={boredom}  X={int(X)} Y={int(Y)}")
         last_status_print = now
 
     sleep(0.05)
