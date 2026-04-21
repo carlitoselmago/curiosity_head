@@ -20,7 +20,7 @@ Y_MAX = 80
 
 dmx.update_channel(6, 255)  # Set general DIMMER to maximum
 dmx.update_channel(Xchan, X)
-dmx.update_channel(10, 15)  # turn the light on
+dmx.update_channel(10, 12)  # turn the light on
 interval = 0.1
 dmx.run(interval)
 
